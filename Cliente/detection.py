@@ -10,14 +10,13 @@ import psutil
 import GPUtil
 import requests
 import logging
-import urllib.parse
 
 class Detection(QThread):
     changePixmap = pyqtSignal(QImage)
     resourceUpdate = pyqtSignal(dict)
     error = pyqtSignal(str)
 
-    def __init__(self, model_path, token, location, receiver, camera_ip, camera_port, camera_user, camera_password):
+    def __init__(self, model_path, token, location, receiver):
         super(Detection, self).__init__()
         self.model_path = model_path
         self.colors = {0: (0, 0, 255), 1: (0, 165, 255)}
@@ -33,10 +32,6 @@ class Detection(QThread):
         self.model = None
         self.running = False
         self.cap = None
-        self.camera_ip = camera_ip
-        self.camera_port = camera_port
-        self.camera_user = camera_user
-        self.camera_password = camera_password
         logging.info("Instancia de Detection inicializada")
 
     def run(self):
@@ -52,14 +47,15 @@ class Detection(QThread):
             self.running = False
             return
 
-        # Modificación para usar la cámara Hikvision con credenciales seguras
-        encoded_user = urllib.parse.quote(self.camera_user)
-        encoded_password = urllib.parse.quote(self.camera_password)
-        rtsp_url = f"rtsp://{encoded_user}:{encoded_password}@{self.camera_ip}:{self.camera_port}/Streaming/Channels/101"
-        self.cap = cv2.VideoCapture(rtsp_url)
+        backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+        for backend in backends:
+            self.cap = cv2.VideoCapture(0 + backend)
+            if self.cap.isOpened():
+                logging.info(f"Cámara abierta con backend: {backend}")
+                break
         
         if not self.cap.isOpened():
-            error_msg = "Error: No se pudo conectar a la cámara IP Hikvision."
+            error_msg = "Error: No se pudo abrir la cámara con ningún backend."
             self.error.emit(error_msg)
             logging.error(error_msg)
             self.running = False
@@ -73,7 +69,7 @@ class Detection(QThread):
             if not ret:
                 retry_count += 1
                 if retry_count > max_retries:
-                    error_msg = "Error: No se pudo leer el frame de la cámara IP después de varios intentos."
+                    error_msg = "Error: No se pudo leer el frame de la cámara después de varios intentos."
                     self.error.emit(error_msg)
                     logging.error(error_msg)
                     break
@@ -91,8 +87,10 @@ class Detection(QThread):
                     error_msg = f"Error durante el procesamiento del frame: {str(e)}"
                     self.error.emit(error_msg)
                     logging.error(error_msg)
+
             self.update_ui(frame)
             self.check_resources()
+
         self.cleanup()
 
     def process_frame(self, frame):
